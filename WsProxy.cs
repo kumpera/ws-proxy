@@ -1,15 +1,13 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
-using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
 using System.Net.WebSockets;
 using System.Threading;
 using System.IO;
 using System.Text;
+using System.Collections.Generic;
 
 namespace WsProxy {
 
@@ -26,7 +24,8 @@ namespace WsProxy {
 			this.Error = error;
 		}
 
-		public static Result FromJson (JObject obj) {
+		public static Result FromJson (JObject obj)
+		{
 			return new Result (obj ["result"] as JObject, obj ["error"] as JObject);
 		}
 
@@ -50,7 +49,7 @@ namespace WsProxy {
 
 		protected virtual Task<bool> AcceptEvent (string method, JObject args, CancellationToken token)
 		{
-			return Task.FromResult(false);
+			return Task.FromResult (false);
 		}
 
 		protected virtual Task<bool> AcceptCommand (int id, string method, JObject args, CancellationToken token)
@@ -63,7 +62,7 @@ namespace WsProxy {
 			return new Uri ("ws://localhost:9222" + path);
 		}
 
-		async Task<string> ReadOne(WebSocket socket, CancellationToken token)
+		async Task<string> ReadOne (WebSocket socket, CancellationToken token)
 		{
 			byte [] buff = new byte [4000];
 			var mem = new MemoryStream ();
@@ -209,7 +208,13 @@ namespace WsProxy {
 			}
 		}
 
-		void Debug (string msg){
+		protected void Debug (string msg)
+		{
+			Console.WriteLine (msg);
+		}
+
+		protected void Info (string msg)
+		{
 			Console.WriteLine (msg);
 		}
 	}
