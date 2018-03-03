@@ -106,6 +106,10 @@ namespace WsProxy {
 		public int Column { get => column; }
 		public CliLocation CliLocation => this.cliLoc;
 
+		public override string ToString ()
+		{
+			return $"{id}:{Line}:{Column}";
+		}
 
 		public static SourceLocation Parse (JObject obj)
 		{

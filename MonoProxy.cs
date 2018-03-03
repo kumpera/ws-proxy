@@ -232,6 +232,8 @@ namespace WsProxy {
 						var method = asm.GetMethodByToken (method_token);
 						var location = method.GetLocationByIl (il_pos);
 
+						Info ($"frame il offset: {il_pos} method token: {method_token} assembly mvid: {assembly_mvid}");
+						Info ($"\tmethod {method.Name} location: {location}");
 						frames.Add (new Frame (method, location, frame_id));
 
 						callFrames.Add (JObject.FromObject (new {
@@ -284,6 +286,7 @@ namespace WsProxy {
 
 		async Task OnDefaultContext (int ctx_id, JObject aux_data, CancellationToken token)
 		{
+			Debug ("Default context created, sending events");
 			foreach (var s in store.AllSources ()) {
 				var ok = JObject.FromObject (new {
 					scriptId = s.SourceId.ToString (),
@@ -292,6 +295,7 @@ namespace WsProxy {
 					hash = s.DocHashCode,
 					executionContextAuxData = aux_data
 				});
+				Debug ($"\tsending {s.Url}");
 				await SendEvent ("Debugger.scriptParsed", ok, token);
 			}
 
@@ -303,8 +307,10 @@ namespace WsProxy {
 				returnByValue = true
 			});
 
+			Debug ("checking if the runtime is ready");
 			var res = await SendCommand ("Runtime.evaluate", o, token);
 			var is_ready = res.Value? ["result"]? ["value"]?.Value<bool> ();
+			Debug ($"\t{is_ready}");
 			if (is_ready.HasValue && is_ready.Value == true) {
 				Debug ("RUNTIME LOOK READY. GO TIME!");
 				await RuntimeReady (token);

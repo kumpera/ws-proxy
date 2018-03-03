@@ -38,6 +38,20 @@ namespace WsProxy {
 		{
 			return new Result (null, err);
 		}
+
+		public JObject ToJObject (int id) {
+			if (IsOk) {
+				return JObject.FromObject (new {
+					id = id,
+					result = Value
+				});
+			} else {
+				return JObject.FromObject (new {
+					id = id,
+					error = Error
+				});
+			}
+		}
 	}
 
 
@@ -87,17 +101,17 @@ namespace WsProxy {
 			await to.SendAsync (new ArraySegment<byte> (bytes), WebSocketMessageType.Text, true, token);
 		}
 
-		async Task OnEvent (string method, JObject args, CancellationToken token)
+		async void OnEvent (string method, JObject args, CancellationToken token)
 		{
 			if (!await AcceptEvent (method, args, token))
-				await SendEvent (method, args, token);
+				await SendEventInternal (method, args, token);
 		}
 
-		async Task OnCommand (int id, string method, JObject args, CancellationToken token)
+		async void OnCommand (int id, string method, JObject args, CancellationToken token)
 		{
 			if (!await AcceptCommand (id, method, args, token)) {
-				var res = await SendCommand (method, args, token);
-				await SendResponse (id, res, token);
+				var res = await SendCommandInternal (method, args, token);
+				await SendResponseInternal (id, res, token);
 			}
 		}
 
@@ -118,7 +132,7 @@ namespace WsProxy {
 				var res = JObject.Parse (msg);
 
 				if (res ["id"] == null)
-					await OnEvent (res ["method"].Value<string> (), res ["params"] as JObject, token);
+					OnEvent (res ["method"].Value<string> (), res ["params"] as JObject, token);
 				else
 					OnResponse (res ["id"].Value<int> (), Result.FromJson (res));
 			}
@@ -131,11 +145,16 @@ namespace WsProxy {
 				Debug ($"ide: {msg}");
 				var res = JObject.Parse (msg);
 
-				await OnCommand (res ["id"].Value<int> (), res ["method"].Value<string> (), res ["params"] as JObject, token);
+				OnCommand (res ["id"].Value<int> (), res ["method"].Value<string> (), res ["params"] as JObject, token);
 			}
 		}
 
-		public async Task<Result> SendCommand (string method, JObject args, CancellationToken token)
+		public async Task<Result> SendCommand (string method, JObject args, CancellationToken token) {
+			Debug ($"sending command {method}: {args}");
+			return await SendCommandInternal (method, args, token);
+		}
+
+		async Task<Result> SendCommandInternal (string method, JObject args, CancellationToken token)
 		{
 			int id = ++next_cmd_id;
 
@@ -154,6 +173,12 @@ namespace WsProxy {
 
 		public async Task SendEvent (string method, JObject args, CancellationToken token)
 		{
+			Debug ($"sending event {method}: {args}");
+			await SendEventInternal (method, args, token);
+		}
+
+		async Task SendEventInternal (string method, JObject args, CancellationToken token)
+		{
 			var o = JObject.FromObject (new {
 				method = method,
 				@params = args
@@ -164,18 +189,13 @@ namespace WsProxy {
 
 		public async Task SendResponse (int id, Result result, CancellationToken token)
 		{
-			JObject o = null;
-			if (result.IsOk) {
-				o = JObject.FromObject (new {
-					id = id,
-					result = result.Value
-				});
-			} else {
-				o = JObject.FromObject (new {
-					id = id,
-					error = result.Error
-				});
-			}
+			Debug ($"sending response: {id}: {result.ToJObject (id)}");
+			await SendResponseInternal (id, result, token);
+		}
+
+		async Task SendResponseInternal (int id, Result result, CancellationToken token)
+		{
+			JObject o = result.ToJObject (id);
 
 			await Send (this.ide, o, token);
 		}
