@@ -220,7 +220,7 @@ namespace WsProxy {
 						await Task.WhenAny (a, b);
 					} catch (Exception e) {
 						Debug ($"got exception {e}");
-						throw;
+						//throw;
 					} finally {
 						x.Cancel ();
 					}

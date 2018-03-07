@@ -210,7 +210,19 @@ namespace WsProxy {
 
 			//step one, figure out where did we hit
 			//lol no, fuck it, let's use fake data
-			var bp_id = res.Value? ["result"]? ["value"]? ["breakpoint_id"].Value<int> ();
+			var res_value = res.Value? ["result"]? ["value"];
+			if (res_value == null || res_value is JValue) {
+				//Give up and send the original call stack
+				await SendEvent ("Debugger.paused", args, token);
+				return;
+			}
+
+			var bp_id = res_value? ["breakpoint_id"]? .Value<int> ();
+			if (!bp_id.HasValue) {
+				//Give up and send the original call stack
+				await SendEvent ("Debugger.paused", args, token);
+				return;
+			}
 			var bp = this.breakpoints [bp_id.Value - 1];
 
 			var src = store.GetFileById (bp.Location.Id);
@@ -329,7 +341,7 @@ namespace WsProxy {
 		{
 
 			var o = JObject.FromObject (new {
-				expression = $"mono_wasm_start_single_stepping({(int)kind})",
+				expression = $"MONO.mono_wasm_start_single_stepping({(int)kind})",
 				objectGroup = "mono_debugger",
 				includeCommandLineAPI = false,
 				silent = false,
