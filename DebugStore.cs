@@ -278,7 +278,9 @@ namespace WsProxy {
 			if (File.Exists (Path.ChangeExtension (file, "pdb")))
 				rp.ReadSymbols = true;
 
-			this.image = ModuleDefinition.ReadModule (File.Open (file, FileMode.Open), rp);
+			rp.InMemory = true;
+
+			this.image = ModuleDefinition.ReadModule (file, rp);
 
 			Populate ();
 		}
@@ -329,8 +331,6 @@ namespace WsProxy {
 
 		public int Id => id;
 		public string Name => Path.GetFileName (file);
-
-		public string Mvid => image.Mvid.ToString ();
 
 		public SourceFile GetDocById (int document)
 		{
@@ -396,9 +396,9 @@ namespace WsProxy {
 			return AllSources ().FirstOrDefault (f => f.SourceId.Equals (id));
 		}
 
-		public AssemblyInfo GetAssemblyByMVID (string mvid)
+		public AssemblyInfo GetAssemblyByName (string name)
 		{
-			return assemblies.FirstOrDefault (a => a.Mvid.Equals (mvid, StringComparison.InvariantCultureIgnoreCase));
+			return assemblies.FirstOrDefault (a => a.Name.Equals (name, StringComparison.InvariantCultureIgnoreCase));
 		}
 
 		/*

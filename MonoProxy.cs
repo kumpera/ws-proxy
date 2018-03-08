@@ -64,7 +64,7 @@ namespace WsProxy {
 			this.store = new DebugStore (prefix);
 		}
 
-		protected override async Task<bool>AcceptEvent (string method, JObject args, CancellationToken token)
+		protected override async Task<bool> AcceptEvent (string method, JObject args, CancellationToken token)
 		{
 			switch (method) {
 			case "Runtime.executionContextCreated": {
@@ -217,7 +217,7 @@ namespace WsProxy {
 				return;
 			}
 
-			var bp_id = res_value? ["breakpoint_id"]? .Value<int> ();
+			var bp_id = res_value? ["breakpoint_id"]?.Value<int> ();
 			if (!bp_id.HasValue) {
 				//Give up and send the original call stack
 				await SendEvent ("Debugger.paused", args, token);
@@ -238,13 +238,13 @@ namespace WsProxy {
 					foreach (var mono_frame in the_mono_frames) {
 						var il_pos = mono_frame ["il_pos"].Value<int> ();
 						var method_token = mono_frame ["method_token"].Value<int> ();
-						var assembly_mvid = mono_frame ["assembly_mvid"].Value<string> ();
+						var assembly_name = mono_frame ["assembly_name"].Value<string> ();
 
-						var asm = store.GetAssemblyByMVID (assembly_mvid);
+						var asm = store.GetAssemblyByName (assembly_name);
 						var method = asm.GetMethodByToken (method_token);
 						var location = method.GetLocationByIl (il_pos);
 
-						Info ($"frame il offset: {il_pos} method token: {method_token} assembly mvid: {assembly_mvid}");
+						Info ($"frame il offset: {il_pos} method token: {method_token} assembly name: {assembly_name}");
 						Info ($"\tmethod {method.Name} location: {location}");
 						frames.Add (new Frame (method, location, frame_id));
 
@@ -400,12 +400,12 @@ namespace WsProxy {
 
 		async Task<Result> EnableBreakPoint (Breakpoint bp, CancellationToken token)
 		{
-			var asm_mvid = bp.Location.CliLocation.Method.Assembly.Mvid.ToLower ();
+			var asm_name = bp.Location.CliLocation.Method.Assembly.Name.ToLower ();
 			var method_token = bp.Location.CliLocation.Method.Token;
 			var il_offset = bp.Location.CliLocation.Offset;
 
 			var o = JObject.FromObject (new {
-				expression = $"mono_wasm_set_breakpoint(\"{asm_mvid}\", {method_token}, {il_offset})",
+				expression = $"mono_wasm_set_breakpoint(\"{asm_name}\", {method_token}, {il_offset})",
 				objectGroup = "mono_debugger",
 				includeCommandLineAPI = false,
 				silent = false,

@@ -56,6 +56,7 @@ namespace WsProxy {
 
 
 	public class WsProxy {
+		TaskCompletionSource<bool> side_exception = new TaskCompletionSource<bool> ();
 		List<(int, TaskCompletionSource<Result>)> pending_cmds = new List<(int, TaskCompletionSource<Result>)> ();
 		ClientWebSocket browser;
 		WebSocket ide;
@@ -103,15 +104,23 @@ namespace WsProxy {
 
 		async void OnEvent (string method, JObject args, CancellationToken token)
 		{
-			if (!await AcceptEvent (method, args, token))
-				await SendEventInternal (method, args, token);
+			try {
+				if (!await AcceptEvent (method, args, token))
+					await SendEventInternal (method, args, token);
+			} catch (Exception e) {
+				side_exception.TrySetException (e);
+			}
 		}
 
 		async void OnCommand (int id, string method, JObject args, CancellationToken token)
 		{
-			if (!await AcceptCommand (id, method, args, token)) {
-				var res = await SendCommandInternal (method, args, token);
-				await SendResponseInternal (id, res, token);
+			try {
+				if (!await AcceptCommand (id, method, args, token)) {
+					var res = await SendCommandInternal (method, args, token);
+					await SendResponseInternal (id, res, token);
+				}
+			} catch (Exception e) {
+				side_exception.TrySetException (e);
 			}
 		}
 
@@ -138,10 +147,23 @@ namespace WsProxy {
 			}
 		}
 
+		async Task<string> ReadAndWatch(WebSocket socket, CancellationToken token)
+		{
+			var msg = ReadOne (socket, token);
+			var side_task = side_exception.Task;
+			var task = await Task.WhenAny (new Task [] { msg, side_task });
+			if (task == msg)
+				return msg.Result;
+
+			var _ = side_task.Result;
+			throw new Exception ("side task must always complete with an exception, whats going on???");
+		}
+
 		async Task ReadFromIde (CancellationToken token)
 		{
 			string msg;
-			while ((msg = await ReadOne (ide, token)) != null) {
+
+			while ((msg = await ReadAndWatch (ide, token)) != null) {
 				Debug ($"ide: {msg}");
 				var res = JObject.Parse (msg);
 
