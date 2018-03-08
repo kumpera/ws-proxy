@@ -155,6 +155,8 @@ namespace WsProxy {
 			if (task == msg)
 				return msg.Result;
 
+			Console.WriteLine ("-------------------------------------------");
+			Console.WriteLine (side_task.Exception);
 			var _ = side_task.Result;
 			throw new Exception ("side task must always complete with an exception, whats going on???");
 		}
