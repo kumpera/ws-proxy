@@ -61,6 +61,7 @@ namespace WsProxy {
 		ClientWebSocket browser;
 		WebSocket ide;
 		int next_cmd_id;
+		List<Task> pending_ops = new List<Task> ();
 
 		protected virtual Task<bool> AcceptEvent (string method, JObject args, CancellationToken token)
 		{
@@ -102,7 +103,7 @@ namespace WsProxy {
 			await to.SendAsync (new ArraySegment<byte> (bytes), WebSocketMessageType.Text, true, token);
 		}
 
-		async void OnEvent (string method, JObject args, CancellationToken token)
+		async Task OnEvent (string method, JObject args, CancellationToken token)
 		{
 			try {
 				if (!await AcceptEvent (method, args, token))
@@ -112,7 +113,7 @@ namespace WsProxy {
 			}
 		}
 
-		async void OnCommand (int id, string method, JObject args, CancellationToken token)
+		async Task OnCommand (int id, string method, JObject args, CancellationToken token)
 		{
 			try {
 				if (!await AcceptCommand (id, method, args, token)) {
@@ -133,44 +134,22 @@ namespace WsProxy {
 			item.Item2.SetResult (result);
 		}
 
-		async Task ReadFromBrowser (CancellationToken token)
+		void ProcessBrowserMessage (string msg, CancellationToken token)
 		{
-			string msg;
-			while ((msg = await ReadOne (browser, token)) != null) {
-				Debug ($"browser: {msg}");
-				var res = JObject.Parse (msg);
+			Debug ($"browser: {msg}");
+			var res = JObject.Parse (msg);
 
-				if (res ["id"] == null)
-					OnEvent (res ["method"].Value<string> (), res ["params"] as JObject, token);
-				else
-					OnResponse (res ["id"].Value<int> (), Result.FromJson (res));
-			}
+			if (res ["id"] == null)
+				pending_ops.Add (OnEvent (res ["method"].Value<string> (), res ["params"] as JObject, token));
+			else
+				OnResponse (res ["id"].Value<int> (), Result.FromJson (res));
 		}
 
-		async Task<string> ReadAndWatch(WebSocket socket, CancellationToken token)
+		void ProcessIdeMessage (string msg, CancellationToken token)
 		{
-			var msg = ReadOne (socket, token);
-			var side_task = side_exception.Task;
-			var task = await Task.WhenAny (new Task [] { msg, side_task });
-			if (task == msg)
-				return msg.Result;
+			var res = JObject.Parse (msg);
 
-			Console.WriteLine ("-------------------------------------------");
-			Console.WriteLine (side_task.Exception);
-			var _ = side_task.Result;
-			throw new Exception ("side task must always complete with an exception, whats going on???");
-		}
-
-		async Task ReadFromIde (CancellationToken token)
-		{
-			string msg;
-
-			while ((msg = await ReadAndWatch (ide, token)) != null) {
-				Debug ($"ide: {msg}");
-				var res = JObject.Parse (msg);
-
-				OnCommand (res ["id"].Value<int> (), res ["method"].Value<string> (), res ["params"] as JObject, token);
-			}
+			pending_ops.Add (OnCommand (res ["id"].Value<int> (), res ["method"].Value<string> (), res ["params"] as JObject, token));
 		}
 
 		public async Task<Result> SendCommand (string method, JObject args, CancellationToken token) {
@@ -237,11 +216,29 @@ namespace WsProxy {
 					Debug ("client connected");
 					var x = new CancellationTokenSource ();
 
-					try {
-						var a = ReadFromBrowser (x.Token);
-						var b = ReadFromIde (x.Token);
+					pending_ops.Add (ReadOne (browser, x.Token));
+					pending_ops.Add (ReadOne (ide, x.Token));
+					pending_ops.Add (side_exception.Task);
 
-						await Task.WhenAny (a, b);
+					try {
+						while (!x.IsCancellationRequested) {
+							var task = await Task.WhenAny (pending_ops);
+							if (task == pending_ops [0]) {
+								var msg = ((Task<string>)task).Result;
+								pending_ops [0] = ReadOne (browser, x.Token); //queue next read
+								ProcessBrowserMessage (msg, x.Token);
+							} else if (task == pending_ops [1]) {
+								var msg = ((Task<string>)task).Result;
+								pending_ops [1] = ReadOne (ide, x.Token); //queue next read
+								ProcessIdeMessage (msg, x.Token);
+							} else if (task == pending_ops [2]) {
+								var res = ((Task<bool>)task).Result;
+								throw new Exception ("side task must always complete with an exception, what's going on???");
+							} else {
+								//must be a background task
+								pending_ops.Remove (task);
+							}
+						}
 					} catch (Exception e) {
 						Debug ($"got exception {e}");
 						//throw;
