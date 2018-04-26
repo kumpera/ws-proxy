@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
 using Newtonsoft.Json.Linq;
@@ -62,6 +63,7 @@ namespace WsProxy {
 		WebSocket ide;
 		int next_cmd_id;
 		List<Task> pending_ops = new List<Task> ();
+		List<WsQueue> queues = new List<WsQueue> ();
 
 		protected virtual Task<bool> AcceptEvent (string method, JObject args, CancellationToken token)
 		{
@@ -97,17 +99,71 @@ namespace WsProxy {
 			}
 		}
 
-		async Task Send (WebSocket to, JObject o, CancellationToken token)
+		class WsQueue {
+			Task current_send;
+			List<Tuple<TaskCompletionSource<bool>, byte []>> pending;
+
+			public WebSocket Ws { get; private set; }
+			public Task CurrentSend { get { return current_send; } }
+			public WsQueue (WebSocket sock) {
+				this.Ws = sock;
+				pending = new List<Tuple<TaskCompletionSource<bool>, byte []>> ();
+			}
+
+			public Task Send (byte[] bytes, CancellationToken token) {
+				var tuple = Tuple.Create (new TaskCompletionSource<bool> (), bytes);
+				pending.Add (tuple);
+				if (pending.Count == 1) {
+					if (current_send != null)
+						throw new Exception ("WTF, current_send MUST BE NULL IF THERE'S no pending send");
+					current_send = Ws.SendAsync (new ArraySegment<byte> (bytes), WebSocketMessageType.Text, true, token);
+				}
+				return tuple.Item1.Task;
+			}
+
+			public Task Pump (CancellationToken token) {
+				current_send = null;
+				var tuple = pending [0];
+				pending.RemoveAt (0);
+				tuple.Item1.SetResult (true);
+
+				if (pending.Count == 1) {
+					if (current_send != null)
+						throw new Exception ("WTF, current_send MUST BE NULL IF THERE'S no pending send");
+					current_send = Ws.SendAsync (new ArraySegment<byte> (pending[0].Item2), WebSocketMessageType.Text, true, token);
+					return pending [0].Item1.Task;
+				}
+				return null;
+			}
+		}
+
+		WsQueue GetQueueForSocket (WebSocket ws)
 		{
-			var bytes = Encoding.UTF8.GetBytes (o.ToString ());
-			await to.SendAsync (new ArraySegment<byte> (bytes), WebSocketMessageType.Text, true, token);
+			return queues.FirstOrDefault (q => q.Ws == ws);
+		}
+
+		WsQueue GetQueueForTask (Task task) {
+			return queues.FirstOrDefault (q => q.CurrentSend == task);
+		}
+
+		Task Send (WebSocket to, JObject o, CancellationToken token)
+		{
+			var bytes = Encoding.UTF8.GetBytes (o.ToString ());		
+
+			var queue = GetQueueForSocket (to);
+			var task = queue.Send (bytes, token);
+			pending_ops.Add (task);
+
+			return task;
 		}
 
 		async Task OnEvent (string method, JObject args, CancellationToken token)
 		{
 			try {
-				if (!await AcceptEvent (method, args, token))
+				if (!await AcceptEvent (method, args, token)) {
+					Console.WriteLine ("proxy browser: {0}::{1}",method, args);
 					await SendEventInternal (method, args, token);
+				}
 			} catch (Exception e) {
 				side_exception.TrySetException (e);
 			}
@@ -127,6 +183,7 @@ namespace WsProxy {
 
 		void OnResponse (int id, Result result)
 		{
+			Console.WriteLine ("got id {0} res {1}", id, result);
 			var idx = pending_cmds.FindIndex (e => e.Item1 == id);
 			var item = pending_cmds [idx];
 			pending_cmds.RemoveAt (idx);
@@ -136,7 +193,7 @@ namespace WsProxy {
 
 		void ProcessBrowserMessage (string msg, CancellationToken token)
 		{
-			Debug ($"browser: {msg}");
+			// Debug ($"browser: {msg}");
 			var res = JObject.Parse (msg);
 
 			if (res ["id"] == null)
@@ -166,11 +223,11 @@ namespace WsProxy {
 				method = method,
 				@params = args
 			});
-			await Send (this.browser, o, token);
-
 			var tcs = new TaskCompletionSource<Result> ();
+			Console.WriteLine ("add cmd id {0}", id);
 			pending_cmds.Add ((id, tcs));
 
+			await Send (this.browser, o, token);
 			return await tcs.Task;
 		}
 
@@ -209,9 +266,11 @@ namespace WsProxy {
 			Debug ("wsproxy start");
 			using (this.ide = await context.WebSockets.AcceptWebSocketAsync ()) {
 				Debug ("ide connected");
+				queues.Add (new WsQueue (this.ide));
 				using (this.browser = new ClientWebSocket ()) {
 					this.browser.Options.KeepAliveInterval = Timeout.InfiniteTimeSpan;
 					await this.browser.ConnectAsync (browserUri, CancellationToken.None);
+					queues.Add (new WsQueue (this.browser));
 
 					Debug ("client connected");
 					var x = new CancellationTokenSource ();
@@ -237,6 +296,12 @@ namespace WsProxy {
 							} else {
 								//must be a background task
 								pending_ops.Remove (task);
+								var queue = GetQueueForTask (task);
+								if (queue != null) {
+									var tsk = queue.Pump (x.Token);
+									if (tsk != null)
+										pending_ops.Add (tsk);
+								}
 							}
 						}
 					} catch (Exception e) {

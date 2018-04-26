@@ -92,7 +92,13 @@ namespace WsProxy {
 					}
 					break;
 				}
-
+			case "Debugger.scriptParsed":{
+					if (args?["url"]?.Value<string> ()?.StartsWith ("wasm://") == true) {
+						// Console.WriteLine ("ignoring wasm event");
+						return true;
+					}
+					break;
+				}
 			}
 
 			return false;
