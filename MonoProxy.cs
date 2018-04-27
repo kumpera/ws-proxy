@@ -111,7 +111,7 @@ namespace WsProxy {
 			case "Debugger.getScriptSource": {
 					var script_id = args? ["scriptId"]?.Value<string> ();
 					if (script_id.StartsWith ("dotnet://", StringComparison.InvariantCultureIgnoreCase)) {
-						await OnGetScriptSource (id, script_id, token);
+						OnGetScriptSource (id, script_id, token);
 						return true;
 					}
 
@@ -120,7 +120,7 @@ namespace WsProxy {
 			case "Runtime.compileScript": {
 					var exp = args? ["expression"]?.Value<string> ();
 					if (exp.StartsWith ("//dotnet:", StringComparison.InvariantCultureIgnoreCase)) {
-						await OnCompileDotnetScript (id, token);
+						OnCompileDotnetScript (id, token);
 						return true;
 					}
 					break;
@@ -131,11 +131,12 @@ namespace WsProxy {
 					//FIXME support variant where restrictToFunction=true and end is omitted
 					var end = SourceLocation.Parse (args? ["end"] as JObject);
 					if (start != null && end != null)
-						return await GetPossibleBreakpoints (id, start, end, token);
+						return GetPossibleBreakpoints (id, start, end, token);
 					break;
 				}
 
 			case "Debugger.setBreakpointByUrl": {
+					Info ($"BP req {args}");
 					var bp_req = BreakPointRequest.Parse (args);
 					if (bp_req != null) {
 						await SetBreakPoint (id, bp_req, token);
@@ -210,7 +211,7 @@ namespace WsProxy {
 
 			if (res.IsErr) {
 				//Give up and send the original call stack
-				await SendEvent ("Debugger.paused", args, token);
+				SendEvent ("Debugger.paused", args, token);
 				return;
 			}
 
@@ -219,14 +220,14 @@ namespace WsProxy {
 			var res_value = res.Value? ["result"]? ["value"];
 			if (res_value == null || res_value is JValue) {
 				//Give up and send the original call stack
-				await SendEvent ("Debugger.paused", args, token);
+				SendEvent ("Debugger.paused", args, token);
 				return;
 			}
 
 			var bp_id = res_value? ["breakpoint_id"]?.Value<int> ();
 			if (!bp_id.HasValue) {
 				//Give up and send the original call stack
-				await SendEvent ("Debugger.paused", args, token);
+				SendEvent ("Debugger.paused", args, token);
 				return;
 			}
 			var bp = this.breakpoints [bp_id.Value - 1];
@@ -299,12 +300,19 @@ namespace WsProxy {
 				}
 			});
 
-			await SendEvent ("Debugger.paused", o, token);
+			SendEvent ("Debugger.paused", o, token);
 		}
 
 		async Task OnDefaultContext (int ctx_id, JObject aux_data, CancellationToken token)
 		{
-			Debug ("Default context created, sending events");
+			Debug ("Default context created, clearing state and sending events");
+
+			//reset all bps
+			foreach (var b in this.breakpoints){
+				b.State = BreakPointState.Pending;
+			}
+			this.runtime_ready = false;
+
 			foreach (var s in store.AllSources ()) {
 				var ok = JObject.FromObject (new {
 					scriptId = s.SourceId.ToString (),
@@ -314,7 +322,7 @@ namespace WsProxy {
 					executionContextAuxData = aux_data
 				});
 				Debug ($"\tsending {s.Url}");
-				await SendEvent ("Debugger.scriptParsed", ok, token);
+				SendEvent ("Debugger.scriptParsed", ok, token);
 			}
 
 			var o = JObject.FromObject (new {
@@ -328,7 +336,7 @@ namespace WsProxy {
 			Debug ("checking if the runtime is ready");
 			var res = await SendCommand ("Runtime.evaluate", o, token);
 			var is_ready = res.Value? ["result"]? ["value"]?.Value<bool> ();
-			Debug ($"\t{is_ready}");
+			//Debug ($"\t{is_ready}");
 			if (is_ready.HasValue && is_ready.Value == true) {
 				Debug ("RUNTIME LOOK READY. GO TIME!");
 				await RuntimeReady (token);
@@ -356,7 +364,7 @@ namespace WsProxy {
 
 			var res = await SendCommand ("Runtime.evaluate", o, token);
 
-			await SendResponse (msg_id, Result.Ok (new JObject ()), token);
+			SendResponse (msg_id, Result.Ok (new JObject ()), token);
 
 			this.current_callstack = null;
 
@@ -383,7 +391,7 @@ namespace WsProxy {
 
 			//if we fail we just buble that to the IDE (and let it panic over it)
 			if (res.IsErr) {
-				await SendResponse (msg_id, res, token);
+				SendResponse (msg_id, res, token);
 				return;
 			}
 
@@ -401,7 +409,7 @@ namespace WsProxy {
 				result = var_list
 			});
 
-			await SendResponse (msg_id, Result.Ok (o), token);
+			SendResponse (msg_id, Result.Ok (o), token);
 		}
 
 		async Task<Result> EnableBreakPoint (Breakpoint bp, CancellationToken token)
@@ -450,6 +458,7 @@ namespace WsProxy {
 		async Task SetBreakPoint (int msg_id, BreakPointRequest req, CancellationToken token)
 		{
 			var bp_loc = store.FindBestBreakpoint (req);
+			Info ($"BP request for '{req}' runtime ready {runtime_ready}");
 
 			Breakpoint bp = null;
 			if (!runtime_ready) {
@@ -462,7 +471,7 @@ namespace WsProxy {
 
 				//if we fail we just buble that to the IDE (and let it panic over it)
 				if (!ret_code.HasValue) {
-					await SendResponse (msg_id, res, token);
+					SendResponse (msg_id, res, token);
 					return;
 				}
 			}
@@ -482,10 +491,10 @@ namespace WsProxy {
 				locations = locations,
 			});
 
-			await SendResponse (msg_id, Result.Ok (ok), token);
+			SendResponse (msg_id, Result.Ok (ok), token);
 		}
 
-		async Task<bool> GetPossibleBreakpoints (int msg_id, SourceLocation start, SourceLocation end, CancellationToken token)
+		bool GetPossibleBreakpoints (int msg_id, SourceLocation start, SourceLocation end, CancellationToken token)
 		{
 			var bps = store.FindPossibleBreakpoints (start, end);
 			if (bps == null)
@@ -500,20 +509,20 @@ namespace WsProxy {
 				locations = loc
 			});
 
-			await SendResponse (msg_id, Result.Ok (o), token);
+			SendResponse (msg_id, Result.Ok (o), token);
 
 			return true;
 		}
 
-		async Task OnCompileDotnetScript (int msg_id, CancellationToken token)
+		void OnCompileDotnetScript (int msg_id, CancellationToken token)
 		{
 			var o = JObject.FromObject (new { });
 
-			await SendResponse (msg_id, Result.Ok (o), token);
+			SendResponse (msg_id, Result.Ok (o), token);
 
 		}
 
-		async Task OnGetScriptSource (int msg_id, string script_id, CancellationToken token)
+		void OnGetScriptSource (int msg_id, string script_id, CancellationToken token)
 		{
 			var id = new SourceId (script_id);
 			var src_file = store.GetFileById (id);
@@ -529,7 +538,7 @@ namespace WsProxy {
 				scriptSource = res.ToString ()
 			});
 
-			await SendResponse (msg_id, Result.Ok (o), token);
+			SendResponse (msg_id, Result.Ok (o), token);
 		}
 	}
 }

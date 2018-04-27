@@ -55,6 +55,46 @@ namespace WsProxy {
 		}
 	}
 
+	class WsQueue {
+		Task current_send;
+		List<byte []> pending;
+
+		public WebSocket Ws { get; private set; }
+		public Task CurrentSend { get { return current_send; } }
+		public WsQueue (WebSocket sock)
+		{
+			this.Ws = sock;
+			pending = new List<byte []> ();
+		}
+
+		public Task Send (byte [] bytes, CancellationToken token)
+		{
+			pending.Add (bytes);
+			if (pending.Count == 1) {
+				if (current_send != null)
+					throw new Exception ("WTF, current_send MUST BE NULL IF THERE'S no pending send");
+				//Console.WriteLine ("sending {0} bytes", bytes.Length);
+				current_send = Ws.SendAsync (new ArraySegment<byte> (bytes), WebSocketMessageType.Text, true, token);
+				return current_send;
+			}
+			return null;
+		}
+
+		public Task Pump (CancellationToken token)
+		{
+			current_send = null;
+			pending.RemoveAt (0);
+
+			if (pending.Count > 0) {
+				if (current_send != null)
+					throw new Exception ("WTF, current_send MUST BE NULL IF THERE'S no pending send");
+				//Console.WriteLine ("sending more {0} bytes", pending[0].Length);
+				current_send = Ws.SendAsync (new ArraySegment<byte> (pending [0]), WebSocketMessageType.Text, true, token);
+				return current_send;
+			}
+			return null;
+		}
+	}
 
 	public class WsProxy {
 		TaskCompletionSource<bool> side_exception = new TaskCompletionSource<bool> ();
@@ -99,43 +139,7 @@ namespace WsProxy {
 			}
 		}
 
-		class WsQueue {
-			Task current_send;
-			List<Tuple<TaskCompletionSource<bool>, byte []>> pending;
 
-			public WebSocket Ws { get; private set; }
-			public Task CurrentSend { get { return current_send; } }
-			public WsQueue (WebSocket sock) {
-				this.Ws = sock;
-				pending = new List<Tuple<TaskCompletionSource<bool>, byte []>> ();
-			}
-
-			public Task Send (byte[] bytes, CancellationToken token) {
-				var tuple = Tuple.Create (new TaskCompletionSource<bool> (), bytes);
-				pending.Add (tuple);
-				if (pending.Count == 1) {
-					if (current_send != null)
-						throw new Exception ("WTF, current_send MUST BE NULL IF THERE'S no pending send");
-					current_send = Ws.SendAsync (new ArraySegment<byte> (bytes), WebSocketMessageType.Text, true, token);
-				}
-				return tuple.Item1.Task;
-			}
-
-			public Task Pump (CancellationToken token) {
-				current_send = null;
-				var tuple = pending [0];
-				pending.RemoveAt (0);
-				tuple.Item1.SetResult (true);
-
-				if (pending.Count == 1) {
-					if (current_send != null)
-						throw new Exception ("WTF, current_send MUST BE NULL IF THERE'S no pending send");
-					current_send = Ws.SendAsync (new ArraySegment<byte> (pending[0].Item2), WebSocketMessageType.Text, true, token);
-					return pending [0].Item1.Task;
-				}
-				return null;
-			}
-		}
 
 		WsQueue GetQueueForSocket (WebSocket ws)
 		{
@@ -146,23 +150,22 @@ namespace WsProxy {
 			return queues.FirstOrDefault (q => q.CurrentSend == task);
 		}
 
-		Task Send (WebSocket to, JObject o, CancellationToken token)
+		void Send (WebSocket to, JObject o, CancellationToken token)
 		{
 			var bytes = Encoding.UTF8.GetBytes (o.ToString ());		
 
 			var queue = GetQueueForSocket (to);
 			var task = queue.Send (bytes, token);
-			pending_ops.Add (task);
-
-			return task;
+			if (task != null)
+				pending_ops.Add (task);
 		}
 
 		async Task OnEvent (string method, JObject args, CancellationToken token)
 		{
 			try {
 				if (!await AcceptEvent (method, args, token)) {
-					Console.WriteLine ("proxy browser: {0}::{1}",method, args);
-					await SendEventInternal (method, args, token);
+					//Console.WriteLine ("proxy browser: {0}::{1}",method, args);
+					SendEventInternal (method, args, token);
 				}
 			} catch (Exception e) {
 				side_exception.TrySetException (e);
@@ -174,7 +177,7 @@ namespace WsProxy {
 			try {
 				if (!await AcceptCommand (id, method, args, token)) {
 					var res = await SendCommandInternal (method, args, token);
-					await SendResponseInternal (id, res, token);
+					SendResponseInternal (id, res, token);
 				}
 			} catch (Exception e) {
 				side_exception.TrySetException (e);
@@ -183,7 +186,7 @@ namespace WsProxy {
 
 		void OnResponse (int id, Result result)
 		{
-			Console.WriteLine ("got id {0} res {1}", id, result);
+			//Console.WriteLine ("got id {0} res {1}", id, result);
 			var idx = pending_cmds.FindIndex (e => e.Item1 == id);
 			var item = pending_cmds [idx];
 			pending_cmds.RemoveAt (idx);
@@ -214,7 +217,7 @@ namespace WsProxy {
 			return await SendCommandInternal (method, args, token);
 		}
 
-		async Task<Result> SendCommandInternal (string method, JObject args, CancellationToken token)
+		Task<Result> SendCommandInternal (string method, JObject args, CancellationToken token)
 		{
 			int id = ++next_cmd_id;
 
@@ -224,40 +227,40 @@ namespace WsProxy {
 				@params = args
 			});
 			var tcs = new TaskCompletionSource<Result> ();
-			Console.WriteLine ("add cmd id {0}", id);
+			//Console.WriteLine ("add cmd id {0}", id);
 			pending_cmds.Add ((id, tcs));
 
-			await Send (this.browser, o, token);
-			return await tcs.Task;
+			Send (this.browser, o, token);
+			return tcs.Task;
 		}
 
-		public async Task SendEvent (string method, JObject args, CancellationToken token)
+		public void SendEvent (string method, JObject args, CancellationToken token)
 		{
-			Debug ($"sending event {method}: {args}");
-			await SendEventInternal (method, args, token);
+			//Debug ($"sending event {method}: {args}");
+			SendEventInternal (method, args, token);
 		}
 
-		async Task SendEventInternal (string method, JObject args, CancellationToken token)
+		void SendEventInternal (string method, JObject args, CancellationToken token)
 		{
 			var o = JObject.FromObject (new {
 				method = method,
 				@params = args
 			});
 
-			await Send (this.ide, o, token);
+			Send (this.ide, o, token);
 		}
 
-		public async Task SendResponse (int id, Result result, CancellationToken token)
+		public void SendResponse (int id, Result result, CancellationToken token)
 		{
-			Debug ($"sending response: {id}: {result.ToJObject (id)}");
-			await SendResponseInternal (id, result, token);
+			//Debug ($"sending response: {id}: {result.ToJObject (id)}");
+			SendResponseInternal (id, result, token);
 		}
 
-		async Task SendResponseInternal (int id, Result result, CancellationToken token)
+		void SendResponseInternal (int id, Result result, CancellationToken token)
 		{
 			JObject o = result.ToJObject (id);
 
-			await Send (this.ide, o, token);
+			Send (this.ide, o, token);
 		}
 
 		public async Task Run (HttpContext context)
@@ -282,6 +285,7 @@ namespace WsProxy {
 					try {
 						while (!x.IsCancellationRequested) {
 							var task = await Task.WhenAny (pending_ops);
+							//Console.WriteLine ("pump {0} {1}", task, pending_ops.IndexOf (task));
 							if (task == pending_ops [0]) {
 								var msg = ((Task<string>)task).Result;
 								pending_ops [0] = ReadOne (browser, x.Token); //queue next read
