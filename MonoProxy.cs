@@ -224,15 +224,17 @@ namespace WsProxy {
 				return;
 			}
 
+			Debug ($"call stack (err is {res.Error} value is:\n{res.Value}");
 			var bp_id = res_value? ["breakpoint_id"]?.Value<int> ();
+			Debug ($"We just hit bp {bp_id}");
 			if (!bp_id.HasValue) {
 				//Give up and send the original call stack
 				SendEvent ("Debugger.paused", args, token);
 				return;
 			}
-			var bp = this.breakpoints [bp_id.Value - 1];
+			var bp = this.breakpoints.FirstOrDefault (b => b.RemoteId == bp_id.Value);
 
-			var src = store.GetFileById (bp.Location.Id);
+			var src = bp == null ? null : store.GetFileById (bp.Location.Id);
 
 			var callFrames = new List<JObject> ();
 			foreach (var f in orig_callframes) {
@@ -291,13 +293,14 @@ namespace WsProxy {
 				}
 			}
 
+			var bp_list = new string [bp == null ? 0 : 1];
+			if (bp != null)
+				bp_list [0] = $"dotnet:{bp.LocalId}";
 
 			o = JObject.FromObject (new {
 				callFrames = callFrames,
 				reason = "other", //other means breakpoint
-				hitBreakpoints = new string [] {
-					$"dotnet:{bp.LocalId}"
-				}
+				hitBreakpoints = bp_list,
 			});
 
 			SendEvent ("Debugger.paused", o, token);
@@ -432,6 +435,7 @@ namespace WsProxy {
 			if (ret_code.HasValue) {
 				bp.RemoteId = ret_code.Value;
 				bp.State = BreakPointState.Active;
+				Debug ($"BP local id {bp.LocalId} enabled with remote id {bp.RemoteId}");
 			}
 
 			return res;
@@ -439,7 +443,22 @@ namespace WsProxy {
 
 		async Task RuntimeReady (CancellationToken token)
 		{
+			var o = JObject.FromObject (new {
+				expression = $"mono_wasm_clear_all_breakpoints()",
+				objectGroup = "mono_debugger",
+				includeCommandLineAPI = false,
+				silent = false,
+				returnByValue = true,
+			});
+
+			var clear_result = await SendCommand ("Runtime.evaluate", o, token);
+			if (clear_result.IsErr) {
+				Debug ($"Failed to clear breakpoints due to {clear_result}");
+			}
+
+
 			runtime_ready = true;
+
 			foreach (var bp in breakpoints) {
 				if (bp.State != BreakPointState.Pending)
 					continue;
