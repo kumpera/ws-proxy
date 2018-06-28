@@ -58,7 +58,7 @@ namespace WsProxy
 					}
 
 					try {
-						var proxy = new MonoProxy ("/Users/kumpera/src/wasm/mono/sdks/wasm/managed");
+						var proxy = new MonoProxy ();
 						await proxy.Run (context);
 					} catch (Exception e) {
 						Console.WriteLine ("got exception {0}", e);

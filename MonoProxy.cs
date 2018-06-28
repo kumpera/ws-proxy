@@ -57,12 +57,10 @@ namespace WsProxy {
 		List<Frame> current_callstack;
 		bool runtime_ready;
 		int local_breakpoint_id;
+		int ctx_id;
+		JObject aux_ctx_data;
 
-		//FIXME make the retrieval into a type so it we server from both disk and network
-		public MonoProxy (string prefix)
-		{
-			this.store = new DebugStore (prefix);
-		}
+		public MonoProxy () { }
 
 		protected override async Task<bool> AcceptEvent (string method, JObject args, CancellationToken token)
 		{
@@ -316,18 +314,6 @@ namespace WsProxy {
 			}
 			this.runtime_ready = false;
 
-			foreach (var s in store.AllSources ()) {
-				var ok = JObject.FromObject (new {
-					scriptId = s.SourceId.ToString (),
-					url = s.Url,
-					executionContextId = ctx_id,
-					hash = s.DocHashCode,
-					executionContextAuxData = aux_data
-				});
-				Debug ($"\tsending {s.Url}");
-				SendEvent ("Debugger.scriptParsed", ok, token);
-			}
-
 			var o = JObject.FromObject (new {
 				expression = "mono_wasm_runtime_is_ready",
 				objectGroup = "mono_debugger",
@@ -335,6 +321,8 @@ namespace WsProxy {
 				silent = false,
 				returnByValue = true
 			});
+			this.ctx_id = ctx_id;
+			this.aux_ctx_data = aux_data;
 
 			Debug ("checking if the runtime is ready");
 			var res = await SendCommand ("Runtime.evaluate", o, token);
@@ -435,7 +423,7 @@ namespace WsProxy {
 			if (ret_code.HasValue) {
 				bp.RemoteId = ret_code.Value;
 				bp.State = BreakPointState.Active;
-				Debug ($"BP local id {bp.LocalId} enabled with remote id {bp.RemoteId}");
+				//Debug ($"BP local id {bp.LocalId} enabled with remote id {bp.RemoteId}");
 			}
 
 			return res;
@@ -443,7 +431,32 @@ namespace WsProxy {
 
 		async Task RuntimeReady (CancellationToken token)
 		{
+
 			var o = JObject.FromObject (new {
+				expression = "MonoRuntime.get_loaded_files()",
+				objectGroup = "mono_debugger",
+				includeCommandLineAPI = false,
+				silent = false,
+				returnByValue = true,
+			});
+			var loaded_pdbs = await SendCommand ("Runtime.evaluate", o, token);
+			var the_value = loaded_pdbs.Value? ["result"]? ["value"];
+			var the_pdbs = the_value?.ToObject<string[]> ();
+			this.store = new DebugStore (the_pdbs);
+
+			foreach (var s in store.AllSources ()) {
+				var ok = JObject.FromObject (new {
+					scriptId = s.SourceId.ToString (),
+					url = s.Url,
+					executionContextId = this.ctx_id,
+					hash = s.DocHashCode,
+					executionContextAuxData = this.aux_ctx_data
+				});
+				//Debug ($"\tsending {s.Url}");
+				SendEvent ("Debugger.scriptParsed", ok, token);
+			}
+
+			o = JObject.FromObject (new {
 				expression = $"mono_wasm_clear_all_breakpoints()",
 				objectGroup = "mono_debugger",
 				includeCommandLineAPI = false,

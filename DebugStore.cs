@@ -5,6 +5,7 @@ using Mono.Cecil;
 using Mono.Cecil.Cil;
 using System.Linq;
 using Newtonsoft.Json.Linq;
+using System.Net.Http;
 
 namespace WsProxy {
 	public class BreakPointRequest {
@@ -261,26 +262,24 @@ namespace WsProxy {
 		ModuleDefinition image;
 		readonly int id;
 		Dictionary<int, MethodInfo> methods = new Dictionary<int, MethodInfo> ();
-
-
 		readonly List<SourceFile> sources = new List<SourceFile> ();
-		readonly string file;
 
-		public AssemblyInfo (string file)
+		public AssemblyInfo (byte[] assembly, byte[] pdb)
 		{
-			this.file = file;
 			lock (typeof (AssemblyInfo)) {
 				this.id = ++next_id;
 			}
 
-			Console.WriteLine ($"Loading {file}");
-			ReaderParameters rp = new ReaderParameters();
-			if (File.Exists (Path.ChangeExtension (file, "pdb")))
+			ReaderParameters rp = new ReaderParameters (/*ReadingMode.Immediate*/);
+			if (pdb != null) {
 				rp.ReadSymbols = true;
+				rp.SymbolReaderProvider = new PortablePdbReaderProvider ();
+				rp.SymbolStream = new MemoryStream (pdb);
+			}
 
 			rp.InMemory = true;
 
-			this.image = ModuleDefinition.ReadModule (file, rp);
+			this.image = ModuleDefinition.ReadModule (new MemoryStream (assembly), rp);
 
 			Populate ();
 		}
@@ -330,7 +329,7 @@ namespace WsProxy {
 		}
 
 		public int Id => id;
-		public string Name => Path.GetFileName (file);
+		public string Name => image.Name;
 
 		public SourceFile GetDocById (int document)
 		{
@@ -374,11 +373,32 @@ namespace WsProxy {
 	public class DebugStore {
 		List<AssemblyInfo> assemblies = new List<AssemblyInfo> ();
 
-		public DebugStore (string prefix)
+		public DebugStore (string[] loaded_files)
 		{
-			foreach (var f in Directory.GetFiles (prefix)) {
-				if (f.EndsWith (".dll", StringComparison.InvariantCultureIgnoreCase) || f.EndsWith (".exe", StringComparison.InvariantCultureIgnoreCase))
-					assemblies.Add (new AssemblyInfo (f));
+			bool MatchPdb (string asm, string pdb) {
+				return Path.ChangeExtension (asm, "pdb") == pdb;
+			}
+
+			var asm_files = new List<string> ();
+			var pdb_files = new List<string> ();
+			foreach (var f in loaded_files) {
+				var file_name = f.ToLower ();
+				if (file_name.EndsWith (".pdb", StringComparison.Ordinal))
+					pdb_files.Add (file_name);
+				else
+					asm_files.Add (file_name);
+			}
+
+			//FIXME make this parallel
+			foreach (var p in asm_files) {
+				var pdb = pdb_files.FirstOrDefault (n => MatchPdb (p, n));
+				HttpClient h = new HttpClient ();
+				var assembly_bytes = h.GetByteArrayAsync (p).Result;
+				byte[] pdb_bytes = null;
+				if (pdb != null)
+					pdb_bytes = h.GetByteArrayAsync (pdb).Result;
+
+				this.assemblies.Add (new AssemblyInfo (assembly_bytes, pdb_bytes));
 			}
 		}
 
