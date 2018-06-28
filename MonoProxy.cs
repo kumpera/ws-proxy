@@ -11,6 +11,17 @@ using System.Text;
 using System.Collections.Generic;
 
 namespace WsProxy {
+
+	public class MonoCommands {
+		public const string GET_CALL_STACK = "MONO.mono_wasm_get_call_stack()";
+		public const string IS_RUNTIME_READY_VAR = "mono_wasm_runtime_is_ready";
+		public const string START_SINGLE_STEPPING = "MONO.mono_wasm_start_single_stepping({0})";
+		public const string GET_SCOPE_VARIABLES = "MONO.mono_wasm_get_variables({0}, [ {1} ])";
+		public const string SET_BREAK_POINT = "mono_wasm_set_breakpoint(\"{0}\", {1}, {2})";
+		public const string GET_LOADED_FILES = "MonoRuntime.get_loaded_files()";
+		public const string CLEAR_ALL_BREAKPOINTS = "mono_wasm_clear_all_breakpoints()";
+	}
+
 	class Frame {
 		public Frame (MethodInfo method, SourceLocation location, int id)
 		{
@@ -197,7 +208,7 @@ namespace WsProxy {
 		{
 			//FIXME we should send release objects every now and then? Or intercept those we inject and deal in the runtime
 			var o = JObject.FromObject (new {
-				expression = "MONO.mono_wasm_get_call_stack()",
+				expression = MonoCommands.GET_CALL_STACK,
 				objectGroup = "mono_debugger",
 				includeCommandLineAPI = false,
 				silent = false,
@@ -315,7 +326,7 @@ namespace WsProxy {
 			this.runtime_ready = false;
 
 			var o = JObject.FromObject (new {
-				expression = "mono_wasm_runtime_is_ready",
+				expression = MonoCommands.IS_RUNTIME_READY_VAR,
 				objectGroup = "mono_debugger",
 				includeCommandLineAPI = false,
 				silent = false,
@@ -346,7 +357,7 @@ namespace WsProxy {
 		{
 
 			var o = JObject.FromObject (new {
-				expression = $"MONO.mono_wasm_start_single_stepping({(int)kind})",
+				expression = string.Format (MonoCommands.START_SINGLE_STEPPING, (int)kind),
 				objectGroup = "mono_debugger",
 				includeCommandLineAPI = false,
 				silent = false,
@@ -371,7 +382,7 @@ namespace WsProxy {
 			var var_ids = string.Join (",", vars.Select (v => v.Index));
 
 			var o = JObject.FromObject (new {
-				expression = $"MONO.mono_wasm_get_variables({scope.Id}, [ {var_ids} ])",
+				expression = string.Format (MonoCommands.GET_SCOPE_VARIABLES, scope.Id, var_ids),
 				objectGroup = "mono_debugger",
 				includeCommandLineAPI = false,
 				silent = false,
@@ -410,7 +421,7 @@ namespace WsProxy {
 			var il_offset = bp.Location.CliLocation.Offset;
 
 			var o = JObject.FromObject (new {
-				expression = $"mono_wasm_set_breakpoint(\"{asm_name}\", {method_token}, {il_offset})",
+				expression = string.Format (MonoCommands.SET_BREAK_POINT, asm_name, method_token, il_offset),
 				objectGroup = "mono_debugger",
 				includeCommandLineAPI = false,
 				silent = false,
@@ -433,7 +444,7 @@ namespace WsProxy {
 		{
 
 			var o = JObject.FromObject (new {
-				expression = "MonoRuntime.get_loaded_files()",
+				expression = MonoCommands.GET_LOADED_FILES,
 				objectGroup = "mono_debugger",
 				includeCommandLineAPI = false,
 				silent = false,
@@ -457,7 +468,7 @@ namespace WsProxy {
 			}
 
 			o = JObject.FromObject (new {
-				expression = $"mono_wasm_clear_all_breakpoints()",
+				expression = MonoCommands.CLEAR_ALL_BREAKPOINTS,
 				objectGroup = "mono_debugger",
 				includeCommandLineAPI = false,
 				silent = false,
