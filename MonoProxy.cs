@@ -14,14 +14,17 @@ namespace WsProxy {
 
 	public class MonoCommands {
 		public const string GET_CALL_STACK = "MONO.mono_wasm_get_call_stack()";
-		public const string IS_RUNTIME_READY_VAR = "mono_wasm_runtime_is_ready";
+		public const string IS_RUNTIME_READY_VAR = "MONO.mono_wasm_runtime_is_ready";
 		public const string START_SINGLE_STEPPING = "MONO.mono_wasm_start_single_stepping({0})";
 		public const string GET_SCOPE_VARIABLES = "MONO.mono_wasm_get_variables({0}, [ {1} ])";
-		public const string SET_BREAK_POINT = "mono_wasm_set_breakpoint(\"{0}\", {1}, {2})";
-		public const string GET_LOADED_FILES = "MonoRuntime.get_loaded_files()";
-		public const string CLEAR_ALL_BREAKPOINTS = "mono_wasm_clear_all_breakpoints()";
+		public const string SET_BREAK_POINT = "MONO.mono_wasm_set_breakpoint(\"{0}\", {1}, {2})";
+		public const string GET_LOADED_FILES = "MONO.mono_wasm_get_loaded_files()";
+		public const string CLEAR_ALL_BREAKPOINTS = "MONO.mono_wasm_clear_all_breakpoints()";
 	}
 
+	public class MonoConstants {
+		public const string RUNTIME_IS_READY = "mono_wasm_runtime_ready";
+	}
 	class Frame {
 		public Frame (MethodInfo method, SourceLocation location, int id)
 		{
@@ -95,7 +98,7 @@ namespace WsProxy {
 						await OnBreakPointHit (args, token);
 						return true;
 					}
-					if (top_func == "mono_wasm_runtime_ready") {
+					if (top_func == MonoConstants.RUNTIME_IS_READY) {
 						await OnRuntimeReady (token);
 						return true;
 					}
