@@ -8,7 +8,7 @@ using Newtonsoft.Json.Linq;
 using System.Net.Http;
 
 namespace WsProxy {
-	public class BreakPointRequest {
+	internal class BreakPointRequest {
 		public string Assembly { get; private set; }
 		public string File { get; private set; }
 		public int Line { get; private set; }
@@ -42,7 +42,7 @@ namespace WsProxy {
 	}
 
 
-	public class VarInfo {
+	internal class VarInfo {
 		public VarInfo (VariableDebugInformation v)
 		{
 			this.Name = v.Name;
@@ -65,7 +65,7 @@ namespace WsProxy {
 	}
 
 
-	public class CliLocation {
+	internal class CliLocation {
 
 		private MethodInfo method;
 		private int offset;
@@ -81,7 +81,7 @@ namespace WsProxy {
 	}
 
 
-	public class SourceLocation {
+	internal class SourceLocation {
 		SourceId id;
 		int line;
 		int column;
@@ -137,7 +137,7 @@ namespace WsProxy {
 
 	}
 
-	public class SourceId {
+	internal class SourceId {
 		readonly int assembly, document;
 
 		public int Assembly => assembly;
@@ -196,7 +196,7 @@ namespace WsProxy {
 		}
 	}
 
-	public class MethodInfo {
+	internal class MethodInfo {
 		AssemblyInfo assembly;
 		internal MethodDefinition methodDef;
 		SourceFile source;
@@ -257,7 +257,7 @@ namespace WsProxy {
 	}
 
 
-	public class AssemblyInfo {
+	internal class AssemblyInfo {
 		static int next_id;
 		ModuleDefinition image;
 		readonly int id;
@@ -343,7 +343,7 @@ namespace WsProxy {
 
 	}
 
-	public class SourceFile {
+	internal class SourceFile {
 		HashSet<MethodInfo> methods;
 		AssemblyInfo assembly;
 		int id;
@@ -370,7 +370,7 @@ namespace WsProxy {
 		public IEnumerable<MethodInfo> Methods => this.methods;
 	}
 
-	public class DebugStore {
+	internal class DebugStore {
 		List<AssemblyInfo> assemblies = new List<AssemblyInfo> ();
 
 		public DebugStore (string[] loaded_files)

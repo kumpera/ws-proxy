@@ -12,7 +12,7 @@ using System.Collections.Generic;
 
 namespace WsProxy {
 
-	public class MonoCommands {
+	internal class MonoCommands {
 		public const string GET_CALL_STACK = "MONO.mono_wasm_get_call_stack()";
 		public const string IS_RUNTIME_READY_VAR = "MONO.mono_wasm_runtime_is_ready";
 		public const string START_SINGLE_STEPPING = "MONO.mono_wasm_start_single_stepping({0})";
@@ -22,7 +22,7 @@ namespace WsProxy {
 		public const string CLEAR_ALL_BREAKPOINTS = "MONO.mono_wasm_clear_all_breakpoints()";
 	}
 
-	public class MonoConstants {
+	internal class MonoConstants {
 		public const string RUNTIME_IS_READY = "mono_wasm_runtime_ready";
 	}
 	class Frame {
@@ -65,7 +65,7 @@ namespace WsProxy {
 		Over
 	}
 
-	public class MonoProxy : WsProxy {
+	internal class MonoProxy : WsProxy {
 		DebugStore store;
 		List<Breakpoint> breakpoints = new List<Breakpoint> ();
 		List<Frame> current_callstack;
