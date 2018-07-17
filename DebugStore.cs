@@ -457,13 +457,18 @@ namespace WsProxy {
 			var doc = GetFileById (src_id);
 
 			var res = new List<SourceLocation> ();
+			if (doc == null) {
+				//FIXME we need to write up logging here
+				Console.WriteLine ($"Could not find document {src_id}");
+				return res;
+			}
+
 			foreach (var m in doc.Methods) {
 				foreach (var sp in m.methodDef.DebugInformation.SequencePoints) {
 					if (Match (sp, start, end))
 						res.Add (new SourceLocation (m, sp));
 				}
 			}
-
 			return res;
 		}
 
