@@ -18,6 +18,7 @@ namespace WsProxy {
 		public const string START_SINGLE_STEPPING = "MONO.mono_wasm_start_single_stepping({0})";
 		public const string GET_SCOPE_VARIABLES = "MONO.mono_wasm_get_variables({0}, [ {1} ])";
 		public const string SET_BREAK_POINT = "MONO.mono_wasm_set_breakpoint(\"{0}\", {1}, {2})";
+		public const string REMOVE_BREAK_POINT = "MONO.mono_wasm_remove_breakpoint({0})";
 		public const string GET_LOADED_FILES = "MONO.mono_wasm_get_loaded_files()";
 		public const string CLEAR_ALL_BREAKPOINTS = "MONO.mono_wasm_clear_all_breakpoints()";
 	}
@@ -156,6 +157,9 @@ namespace WsProxy {
 					}
 					break;
 				}
+			case "Debugger.removeBreakpoint": {
+				return await RemoveBreakpoint (id, args, token);
+			}
 
 			case "Debugger.resume": {
 					await OnResume (token);
@@ -512,6 +516,48 @@ namespace WsProxy {
 					bp.State = BreakPointState.Disabled;
 				}
 			}
+		}
+
+		async Task<bool> RemoveBreakpoint(int msg_id, JObject args, CancellationToken token) {
+			var bpid = args? ["breakpointId"]?.Value<string> ();
+			if (bpid?.StartsWith ("dotnet:") != true)
+				return false;
+
+			var the_id = int.Parse (bpid.Substring ("dotnet:".Length));
+
+			var bp = breakpoints.FirstOrDefault (b => b.LocalId == the_id);
+			if (bp == null) {
+				Info ($"Could not find dotnet bp with id {the_id}");
+				return false;
+			}
+
+			breakpoints.Remove (bp);
+			//FIXME verify result (and log?)
+			var res = await RemoveBreakPoint (bp, token);
+
+			return true;
+		}
+
+
+		async Task<Result> RemoveBreakPoint (Breakpoint bp, CancellationToken token)
+		{
+			var o = JObject.FromObject (new {
+				expression = string.Format (MonoCommands.REMOVE_BREAK_POINT, bp.RemoteId),
+				objectGroup = "mono_debugger",
+				includeCommandLineAPI = false,
+				silent = false,
+				returnByValue = true,
+			});
+
+			var res = await SendCommand ("Runtime.evaluate", o, token);
+			var ret_code = res.Value? ["result"]? ["value"]?.Value<int> ();
+
+			if (ret_code.HasValue) {
+				bp.RemoteId = -1;
+				bp.State = BreakPointState.Disabled;
+			}
+
+			return res;
 		}
 
 		async Task SetBreakPoint (int msg_id, BreakPointRequest req, CancellationToken token)
