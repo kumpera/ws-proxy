@@ -432,7 +432,7 @@ namespace WsProxy {
 
 		async Task<Result> EnableBreakPoint (Breakpoint bp, CancellationToken token)
 		{
-			var asm_name = bp.Location.CliLocation.Method.Assembly.Name.ToLower ();
+			var asm_name = bp.Location.CliLocation.Method.Assembly.Name;
 			var method_token = bp.Location.CliLocation.Method.Token;
 			var il_offset = bp.Location.CliLocation.Offset;
 
